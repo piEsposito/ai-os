@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pi-ai-os"
-version = "0.0.2"
+version = "0.0.3"
 description = "Integrate your OS with an LLM."
 authors = ["piEsposito <piero.skywalker@gmail.com>"]
 license = "Apache 2.0"

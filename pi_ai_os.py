@@ -173,8 +173,7 @@ def select_relevant_files_on_chdir(
     if os.environ.get("VERBOSE"):
         print(response)
     dependencies = extract_dependencies(response)
-    if os.environ.get("VERBOSE"):
-        print(f"Dependencies: {dependencies}")
+    print(f"Dependencies: {dependencies}")
     dependencies_content = ""
     for dependency in dependencies:
         with open(dependency, "r") as f:
@@ -197,10 +196,19 @@ def pi_ai_os(model: str, initial_message: str, config_file: str, assistant: bool
     if not os.path.exists(config_file):
         config_file = None
 
+    target_dirs = None
     if config_file:
         config = OmegaConf.load(config_file)
-        ALLOWED_EXTENSIONS.extend(config.allowed_extensions)
-        IGNORED_DIRS.extend(config.ignored_dirs)
+
+        allowed_extensions = (
+            config.allowed_extensions
+            if "allowed_extensions" in config
+            else ALLOWED_EXTENSIONS
+        )
+        ignored_dirs = config.ignored_dirs if "ignored_dirs" in config else IGNORED_DIRS
+        ALLOWED_EXTENSIONS.extend(allowed_extensions)
+        IGNORED_DIRS.extend(ignored_dirs)
+        target_dirs = config.target_dirs if "target_dirs" in config else None
 
     system_prompt = SYSTEM_PROMPT.format(shell_info=get_shell_info())
     if os.environ.get("VERBOSE"):
@@ -238,7 +246,9 @@ def pi_ai_os(model: str, initial_message: str, config_file: str, assistant: bool
                 )
 
         if assistant:
-            dependencies_context = select_relevant_files_on_chdir(user_message)
+            dependencies_context = select_relevant_files_on_chdir(
+                user_message, target_dirs
+            )
             user_message = f"{user_message}\n\nYou are also provided following context: {dependencies_context}"
 
         if os.environ.get("VERBOSE"):
