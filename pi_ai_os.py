@@ -7,7 +7,6 @@ import re
 import subprocess
 import sys
 
-import yaml
 from PIL import Image
 from tiny_ai_client import AI
 
@@ -23,44 +22,6 @@ def get_shell_info():
         return f"{uname}\n{shell_version}"
     except subprocess.CalledProcessError:
         return "Unable to determine shell information"
-
-
-def create_context_prompt(config_file):
-    with open(config_file, "r") as f:
-        config = yaml.safe_load(f)
-
-    context_prompt = ""
-
-    # Add recursive list of paths for each directory
-    for directory in config.get("directories", []):
-        context_prompt += f"Recursive list of paths in {directory}:\n"
-        try:
-            output = subprocess.check_output(f"ls -R {directory}", shell=True).decode()
-            context_prompt += output + "\n\n"
-        except subprocess.CalledProcessError:
-            context_prompt += f"Error listing directory {directory}\n\n"
-
-    # Add file contents with descriptions
-    for file_info in config.get("context", []):
-        file_path = file_info["file"]
-        description = file_info.get("description", "")
-        context_prompt += f"File: {file_path}\n"
-        context_prompt += f"Description: {description}\n"
-        try:
-            with open(file_path, "r") as f:
-                context_prompt += f"Content:\n{f.read()}\n\n"
-        except IOError:
-            context_prompt += f"Error reading file {file_path}\n\n"
-
-    context_prompt = f"""
-## Context
-
-You are provided information about some files and the directory structure of the current working directory.
-The USER can refer to this information to complete tasks, like editing files, running commands, etc.
-
-{context_prompt}
-"""
-    return context_prompt
 
 
 # System prompt to set the assistant's behavior
@@ -104,10 +65,117 @@ On sh:
 - When a task is completed, STOP using commands. Just answer with "Done.".
 
 - The system shell in use is: {shell_info}.
-
-{context_prompt}"""
+"""
 
 DEFAULT_CONFIG_FILE = "pi_ai_os.yaml"
+ALLOWED_EXTENSIONS = [".txt", ".md", ".py", ".sh", ".json", ".go", ".rs", ".js"]
+IGNORED_DIRS = [
+    ".git",
+    ".idea",
+    "__pycache__",
+    "__pycache__",
+    "node_modules",
+    "venv",
+    "assets",
+]
+ASSISTANT_MODEL_NAME = (
+    "claude-3-haiku-20240307"  # hardcoded because it is fast and cheap af
+)
+
+
+ASSISTANT_MODEL_SYSTEM_PROMPT = """
+# INPUT
+You will be given a user prompt and a list of possibly relevant files on the current directory.
+
+# OUTPUT
+You must answer with a list of files that are, or that you predict WILL BE
+used, directly or not, to complete the user prompt. Answer in a <FILES/> tag.
+Optionally, you can also include a SHORT, 1-paragraph <JUSTIFICATION/>.
+
+# EXAMPLE INPUT
+<USER_PROMPT>
+Create a script that receives two user inputs and sums them.
+</USER_PROMPT>
+<CONTEXT>
+File: src/sum.py
+Content:
+```
+def sum(a: int, b: int) -> int:
+    return a + b
+```
+File: src/divide.py
+Content:
+```
+def divide(a: int, b: int) -> int:
+    return a / b
+```
+</CONTEXT>
+
+</EXAMPLE_INPUT>
+# EXAMPLE OUTPUT
+<JUSTIFICATION>
+The user will use the sum function to process the user inputs as per requested on the prompt.
+</JUSTIFICATION>
+<FILES>
+src/sum.py
+</FILES>
+
+the FILES tag must contain the name of the relevant files, one per line, without anything else.
+"""
+
+
+def create_context_from_chdir():
+    context = ""
+    base_dir = "."
+    for root, _, files in os.walk(base_dir):
+        if any(root.endswith(dir) for dir in IGNORED_DIRS):
+            continue
+        for file in files:
+            if not any(file.endswith(ext) for ext in ALLOWED_EXTENSIONS):
+                continue
+            full_fname = os.path.join(root, file)
+            with open(full_fname, "r") as f:
+                file_content = f.read()
+            context += f"File: {full_fname}\nContent:\n```{file_content}```\n\n"
+    return context
+
+
+def extract_dependencies(raw_text):
+    pattern = r"<FILES>(.*?)</FILES>"
+    match = re.search(pattern, raw_text, re.DOTALL)
+
+    if match:
+        content = match.group(1)
+        return [line.strip() for line in content.split("\n") if line.strip()]
+    else:
+        return []
+
+
+def select_relevant_files_on_chdir(user_prompt: str):
+    assistant = AI(
+        ASSISTANT_MODEL_NAME,
+        system=ASSISTANT_MODEL_SYSTEM_PROMPT,
+        max_new_tokens=1024,
+        temperature=0,
+    )
+    context = create_context_from_chdir()
+    prompt = f"<USER_PROMPT>{user_prompt}</USER_PROMPT>\n<CONTEXT>{context}</CONTEXT>"
+    if os.environ.get("VERBOSE"):
+        print(prompt)
+    response = assistant(prompt)
+    if os.environ.get("VERBOSE"):
+        print(response)
+    dependencies = extract_dependencies(response)
+    if os.environ.get("VERBOSE"):
+        print(f"Dependencies: {dependencies}")
+    dependencies_content = ""
+    for dependency in dependencies:
+        with open(dependency, "r") as f:
+            dependencies_content += (
+                f"File: {dependency}\nContent:\n```{f.read()}```\n\n"
+            )
+    dependencies_context = f"<DEPENDENCIES>{dependencies_content}</DEPENDENCIES>"
+    return dependencies_context
 
 
 def extract_code(text: str) -> str:
@@ -115,18 +183,16 @@ def extract_code(text: str) -> str:
     return match.group(1).strip() if match else None
 
 
-def pi_ai_os(model: str, initial_message: str, config_file: str):
+def pi_ai_os(model: str, initial_message: str, config_file: str, assistant: bool):
     print(f"Welcome to AIOS. Model: {model}\n")
 
     config_file = config_file or DEFAULT_CONFIG_FILE
     if not os.path.exists(config_file):
         config_file = None
 
-    context_prompt = create_context_prompt(config_file) if config_file else ""
-
-    system_prompt = SYSTEM_PROMPT.format(
-        shell_info=get_shell_info(), context_prompt=context_prompt
-    )
+    system_prompt = SYSTEM_PROMPT.format(shell_info=get_shell_info())
+    if os.environ.get("VERBOSE"):
+        print(f"System prompt: {system_prompt}")
 
     # Initialize AI
     ai = AI(
@@ -143,7 +209,7 @@ def pi_ai_os(model: str, initial_message: str, config_file: str):
             initial_message = None
         else:
             user_message = input("\033[1mπ \033[0m")
-            if user_message.strip() == "/clear":
+            if user_message.strip() == "/clear" or user_message.strip() == "/c":
                 ai.chat = [ai.chat[0]]
                 print("Cleared context.")
                 continue
@@ -158,6 +224,13 @@ def pi_ai_os(model: str, initial_message: str, config_file: str):
                 user_message = re.sub(
                     r"/image\s+\S+", f"[Image: {image_path}]", user_message
                 )
+
+        if assistant:
+            dependencies_context = select_relevant_files_on_chdir(user_message)
+            user_message = f"{user_message}\n\nYou are also provided following context: {dependencies_context}"
+
+        if os.environ.get("VERBOSE"):
+            print(f"User message: {user_message}")
 
         try:
             full_message = (
@@ -204,13 +277,27 @@ def main():
         "-m", "--model", default="claude-3-5-sonnet-20240620", help="AI model to use"
     )
     parser.add_argument("-c", "--config", help="Path to the configuration file")
+    parser.add_argument(
+        "-a",
+        "--assistant",
+        help="Triggers using an assistant model for context gathering",
+        action="store_true",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        help="Increase output verbosity",
+        action="store_true",
+    )
     parser.add_argument("message", nargs="*", help="Initial message to send to the AI")
 
     args = parser.parse_args()
+    if args.verbose:
+        os.environ["VERBOSE"] = "1"
 
     initial_message = " ".join(args.message) if args.message else None
     try:
-        pi_ai_os(args.model, initial_message, args.config)
+        pi_ai_os(args.model, initial_message, args.config, args.assistant)
     except KeyboardInterrupt:
         print("\nExiting...")
         sys.exit(0)
