@@ -177,6 +177,8 @@ def select_relevant_files_on_chdir(
     print(f"Dependencies: {dependencies}")
     dependencies_content = ""
     for dependency in dependencies:
+        if not any(dependency.endswith(ext) for ext in ALLOWED_EXTENSIONS):
+            continue
         if os.path.exists(dependency):
             dependencies_content += f"File: {dependency}\nContent:\n```{subprocess.check_output(['cat', '-n', dependency], stderr=subprocess.STDOUT).decode()}```\n\n"
         else:
@@ -238,14 +240,13 @@ def pi_ai_os(model: str, initial_message: str, config_file: str, assistant: bool
                 continue
 
         images = []
-        image_match = re.search(r"/image\s+(\S+)", user_message)
-        if image_match:
-            image_path = image_match.group(1)
+        image_matches = re.findall(r"/image\s+(\S+)", user_message)
+        for image_path in image_matches:
             image_data = Image.open(image_path)
             if image_data:
                 images.append(image_data)
-                user_message = re.sub(
-                    r"/image\s+\S+", f"[Image: {image_path}]", user_message
+                user_message = user_message.replace(
+                    f"/image {image_path}", f"[Image: {image_path}]"
                 )
 
         if assistant:
