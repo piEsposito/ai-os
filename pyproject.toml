@@ -10,6 +10,7 @@ readme = "README.md"
 python = "^3.12"
 tiny-ai-client = "^0.0.11"
 pillow = "^10.4.0"
+omegaconf = "^2.3.0"
 
 [tool.poetry.scripts]
 aios = "pi_ai_os:main"

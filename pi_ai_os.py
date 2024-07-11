@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 
+from omegaconf import OmegaConf
 from PIL import Image
 from tiny_ai_client import AI
 
@@ -121,22 +122,26 @@ src/sum.py
 </FILES>
 
 the FILES tag must contain the name of the relevant files, one per line, without anything else.
+You can only return files that appeared in the context tags, even if they mention other files or directories that were not written there.
 """
 
 
-def create_context_from_chdir():
+def create_context_from_chdir(target_dirs: list[str] | None = None):
     context = ""
-    base_dir = "."
-    for root, _, files in os.walk(base_dir):
-        if any(root.endswith(dir) for dir in IGNORED_DIRS):
-            continue
-        for file in files:
-            if not any(file.endswith(ext) for ext in ALLOWED_EXTENSIONS):
+    if not target_dirs:
+        target_dirs = ["."]
+
+    for dir_ in target_dirs:
+        for root, _, files in os.walk(dir_):
+            if any(root.endswith(dir) for dir in IGNORED_DIRS):
                 continue
-            full_fname = os.path.join(root, file)
-            with open(full_fname, "r") as f:
-                file_content = f.read()
-            context += f"File: {full_fname}\nContent:\n```{file_content}```\n\n"
+            for file in files:
+                if not any(file.endswith(ext) for ext in ALLOWED_EXTENSIONS):
+                    continue
+                full_fname = os.path.join(root, file)
+                with open(full_fname, "r") as f:
+                    file_content = f.read()
+                context += f"File: {full_fname}\nContent:\n```{file_content}```\n\n"
     return context
 
 
@@ -151,14 +156,16 @@ def extract_dependencies(raw_text):
         return []
 
 
-def select_relevant_files_on_chdir(user_prompt: str):
+def select_relevant_files_on_chdir(
+    user_prompt: str, target_dirs: list[str] | None = None
+):
     assistant = AI(
         ASSISTANT_MODEL_NAME,
         system=ASSISTANT_MODEL_SYSTEM_PROMPT,
         max_new_tokens=1024,
         temperature=0,
     )
-    context = create_context_from_chdir()
+    context = create_context_from_chdir(target_dirs)
     prompt = f"<USER_PROMPT>{user_prompt}</USER_PROMPT>\n<CONTEXT>{context}</CONTEXT>"
     if os.environ.get("VERBOSE"):
         print(prompt)
@@ -189,6 +196,11 @@ def pi_ai_os(model: str, initial_message: str, config_file: str, assistant: bool
     config_file = config_file or DEFAULT_CONFIG_FILE
     if not os.path.exists(config_file):
         config_file = None
+
+    if config_file:
+        config = OmegaConf.load(config_file)
+        ALLOWED_EXTENSIONS.extend(config.allowed_extensions)
+        IGNORED_DIRS.extend(config.ignored_dirs)
 
     system_prompt = SYSTEM_PROMPT.format(shell_info=get_shell_info())
     if os.environ.get("VERBOSE"):
