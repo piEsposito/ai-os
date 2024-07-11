@@ -123,6 +123,7 @@ src/sum.py
 
 the FILES tag must contain the name of the relevant files, one per line, without anything else.
 You can only return files that appeared in the context tags, even if they mention other files or directories that were not written there.
+If a file does not exist (and the user asks for something that will create it), do not include it in the list of dependencies.
 """
 
 
@@ -176,9 +177,11 @@ def select_relevant_files_on_chdir(
     print(f"Dependencies: {dependencies}")
     dependencies_content = ""
     for dependency in dependencies:
-        with open(dependency, "r") as f:
+        if os.path.exists(dependency):
+            dependencies_content += f"File: {dependency}\nContent:\n```{subprocess.check_output(['cat', '-n', dependency], stderr=subprocess.STDOUT).decode()}```\n\n"
+        else:
             dependencies_content += (
-                f"File: {dependency}\nContent:\n```{f.read()}```\n\n"
+                f"File: {dependency} does not exist.\nContent:null\n"
             )
     dependencies_context = f"<DEPENDENCIES>{dependencies_content}</DEPENDENCIES>"
     return dependencies_context

@@ -1,4 +1,4 @@
-# AI-OS: Plug an LLM into your OS
+# AIOS: give a LLM full access to your terminal for the sake of science.
 
 This is basically https://github.com/VictorTaelin/AI-scripts/blob/main/chatsh.mjs implemented in Python, with additional features like image analysis, configuration files.
 
