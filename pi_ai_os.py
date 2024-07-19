@@ -124,6 +124,7 @@ src/sum.py
 the FILES tag must contain the name of the relevant files, one per line, without anything else.
 You can only return files that appeared in the context tags, even if they mention other files or directories that were not written there.
 If a file does not exist (and the user asks for something that will create it), do not include it in the list of dependencies.
+If there are no relevant files, just return the tags without any content.
 """
 
 
@@ -158,10 +159,12 @@ def extract_dependencies(raw_text):
 
 
 def select_relevant_files_on_chdir(
-    user_prompt: str, target_dirs: list[str] | None = None
+    user_prompt: str,
+    target_dirs: list[str] | None = None,
+    assistant_model: str = ASSISTANT_MODEL_NAME,
 ):
     assistant = AI(
-        ASSISTANT_MODEL_NAME,
+        assistant_model,
         system=ASSISTANT_MODEL_SYSTEM_PROMPT,
         max_new_tokens=1024,
         temperature=0,
@@ -194,8 +197,16 @@ def extract_code(text: str) -> str:
     return match.group(1).strip() if match else None
 
 
-def pi_ai_os(model: str, initial_message: str, config_file: str, assistant: bool):
+def pi_ai_os(
+    model: str,
+    initial_message: str,
+    config_file: str,
+    assistant: bool,
+    assistant_model: str,
+):
     print(f"Welcome to AIOS. Model: {model}\n")
+    if assistant:
+        print(f"Assistant model: {assistant_model}")
 
     config_file = config_file or DEFAULT_CONFIG_FILE
     if not os.path.exists(config_file):
@@ -251,7 +262,7 @@ def pi_ai_os(model: str, initial_message: str, config_file: str, assistant: bool
 
         if assistant:
             dependencies_context = select_relevant_files_on_chdir(
-                user_message, target_dirs
+                user_message, target_dirs, assistant_model
             )
             user_message = f"{user_message}\n\nYou are also provided following context: {dependencies_context}"
 
@@ -310,6 +321,12 @@ def main():
         action="store_true",
     )
     parser.add_argument(
+        "-am",
+        "--assistant-model",
+        help="Specify the assistant model name",
+        default=ASSISTANT_MODEL_NAME,
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         help="Increase output verbosity",
@@ -323,7 +340,13 @@ def main():
 
     initial_message = " ".join(args.message) if args.message else None
     try:
-        pi_ai_os(args.model, initial_message, args.config, args.assistant)
+        pi_ai_os(
+            args.model,
+            initial_message,
+            args.config,
+            args.assistant,
+            args.assistant_model,
+        )
     except KeyboardInterrupt:
         print("\nExiting...")
         sys.exit(0)
